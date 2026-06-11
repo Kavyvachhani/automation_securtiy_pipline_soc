@@ -36,50 +36,20 @@ jobs:
             --report-path scan_results/gitleaks-results.json \
             --exit-code 0 \
             --log-level warn 2>&1 || true
-          python3 - << 'PYEOF'
-import json
-try:
-    data = json.load(open('scan_results/gitleaks-results.json'))
-    count = len(data) if isinstance(data, list) else 0
-    print(f'Gitleaks: {count} secrets detected')
-except Exception as e:
-    print(f'Gitleaks output parse error: {e}')
-PYEOF
+          python3 -c "import json; d=json.load(open('scan_results/gitleaks-results.json')); print('Gitleaks: ' + str(len(d) if isinstance(d,list) else 0) + ' secrets detected')" 2>/dev/null || echo "Gitleaks output check skipped"
         continue-on-error: true
 
       - name: Gitleaks - Ensure Valid Output
         run: |
-          python3 - << 'PYEOF'
-import json
-try:
-    data = json.load(open('scan_results/gitleaks-results.json'))
-    if data is None:
-        raise ValueError('null')
-except Exception:
-    json.dump([], open('scan_results/gitleaks-results.json', 'w'))
-    print('Reset gitleaks output to empty array')
-PYEOF
+          python3 -c "import json; json.load(open('scan_results/gitleaks-results.json'))" 2>/dev/null || echo '[]' > scan_results/gitleaks-results.json
 
       - name: TruffleHog - Install and Scan
         run: |
           curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | \
             sh -s -- -b /tmp/trufflehog-bin 2>/dev/null || true
-          cat > /tmp/th_parse.py << 'PYEOF'
-import sys, json
-lines = []
-for line in sys.stdin:
-    line = line.strip()
-    if line:
-        try:
-            lines.append(json.loads(line))
-        except Exception:
-            pass
-json.dump(lines, open('scan_results/trufflehog-results.json', 'w'), indent=2)
-print(f'TruffleHog: {len(lines)} secrets detected')
-PYEOF
           if [ -f /tmp/trufflehog-bin/trufflehog ]; then
             /tmp/trufflehog-bin/trufflehog git file://. --json --no-update 2>/dev/null | \
-              python3 /tmp/th_parse.py || echo "[]" > scan_results/trufflehog-results.json
+              python3 .github/scripts/parse_trufflehog.py || echo "[]" > scan_results/trufflehog-results.json
           else
             echo "TruffleHog install failed - writing empty result"
             echo "[]" > scan_results/trufflehog-results.json
@@ -120,26 +90,12 @@ PYEOF
             --json \
             --output scan_results/semgrep-results.json \
             ./juice-shop 2>&1 | tail -5 || true
-          python3 - << 'PYEOF'
-import json
-from collections import Counter
-data = json.load(open('scan_results/semgrep-results.json'))
-results = data.get('results', [])
-sev_map = {'ERROR': 'HIGH', 'WARNING': 'MEDIUM', 'INFO': 'LOW'}
-counts = Counter(sev_map.get(r.get('extra', {}).get('severity', 'INFO').upper(), 'LOW') for r in results)
-print(f'Semgrep: {len(results)} findings - ' + ' | '.join(f'{k}:{v}' for k, v in sorted(counts.items())))
-PYEOF
+          python3 -c "import json; d=json.load(open('scan_results/semgrep-results.json')); r=d.get('results',[]); print('Semgrep: ' + str(len(r)) + ' findings')" 2>/dev/null || true
         continue-on-error: true
 
       - name: Semgrep - Ensure Valid Output
         run: |
-          python3 - << 'PYEOF'
-import json
-try:
-    json.load(open('scan_results/semgrep-results.json'))
-except Exception:
-    json.dump({'results': [], 'errors': []}, open('scan_results/semgrep-results.json', 'w'))
-PYEOF
+          python3 -c "import json; json.load(open('scan_results/semgrep-results.json'))" 2>/dev/null || echo '{"results":[],"errors":[]}' > scan_results/semgrep-results.json
 
       - name: SonarQube Analysis (Requires SONAR_TOKEN secret)
         if: ${{ env.SONAR_TOKEN != '' }}
@@ -164,11 +120,7 @@ PYEOF
             "${HOST}/api/issues/search?componentKeys=${KEY}&pageSize=500&severities=BLOCKER,CRITICAL,MAJOR,MINOR" \
             -o "../scan_results/sonarqube-results.json" || \
             echo '{"issues":[],"paging":{"total":0}}' > "../scan_results/sonarqube-results.json"
-          python3 - << 'PYEOF'
-import json
-data = json.load(open('../scan_results/sonarqube-results.json'))
-print(f'SonarQube: {data.get("paging", {}).get("total", 0)} issues')
-PYEOF
+          python3 -c "import json; d=json.load(open('../scan_results/sonarqube-results.json')); print('SonarQube: ' + str(d.get('paging',{}).get('total',0)) + ' issues')" 2>/dev/null || true
         continue-on-error: true
 
       - name: SonarQube - Ensure Output Exists
@@ -213,12 +165,7 @@ PYEOF
           cd juice-shop
           npm install --ignore-scripts --prefer-offline --legacy-peer-deps 2>/dev/null | tail -3 || true
           npm audit --json > ../scan_results/npm-audit-results.json 2>&1 || true
-          python3 - << 'PYEOF'
-import json
-data = json.load(open('../scan_results/npm-audit-results.json'))
-meta = data.get('metadata', {}).get('vulnerabilities', {})
-print(f'npm audit: critical={meta.get("critical", 0)} high={meta.get("high", 0)} moderate={meta.get("moderate", 0)} low={meta.get("low", 0)}')
-PYEOF
+          python3 -c "import json; m=json.load(open('../scan_results/npm-audit-results.json')).get('metadata',{}).get('vulnerabilities',{}); print('npm audit: critical=' + str(m.get('critical',0)) + ' high=' + str(m.get('high',0)))" 2>/dev/null || true
         continue-on-error: true
 
       - name: Grype Vulnerability Scan
@@ -236,11 +183,7 @@ PYEOF
           mkdir -p scan_results
           if [ -f results.json ]; then
             cp results.json scan_results/grype-results.json
-            python3 - << 'PYEOF'
-import json
-d = json.load(open('scan_results/grype-results.json'))
-print(f'Grype: {len(d.get("matches", []))} vulnerability matches')
-PYEOF
+            python3 -c "import json; d=json.load(open('scan_results/grype-results.json')); print('Grype: ' + str(len(d.get('matches',[]))) + ' matches')" 2>/dev/null || true
           else
             echo '{"matches":[]}' > scan_results/grype-results.json
           fi
@@ -281,33 +224,11 @@ PYEOF
             --framework terraform \
             --output json \
             --soft-fail 2>/dev/null > scan_results/checkov-results.json || true
-          python3 - << 'PYEOF'
-import json
-data = json.load(open('scan_results/checkov-results.json'))
-if isinstance(data, list):
-    data = data[0] if data else {}
-failed = len(data.get('results', {}).get('failed_checks', []))
-passed = len(data.get('results', {}).get('passed_checks', []))
-print(f'Checkov: {failed} failed checks, {passed} passed checks')
-PYEOF
+          python3 -c "import json; d=json.load(open('scan_results/checkov-results.json')); d2=d[0] if isinstance(d,list) and d else d; f=len(d2.get('results',{}).get('failed_checks',[])); print('Checkov: ' + str(f) + ' failed checks')" 2>/dev/null || true
         continue-on-error: true
 
       - name: Checkov - Normalize Array to Object
-        run: |
-          python3 - << 'PYEOF'
-import json
-try:
-    data = json.load(open('scan_results/checkov-results.json'))
-    if isinstance(data, list):
-        data = data[0] if data else {'results': {'failed_checks': [], 'passed_checks': []}, 'summary': {'failed': 0, 'passed': 0}}
-    data.setdefault('results', {'failed_checks': [], 'passed_checks': []})
-    data['results'].setdefault('failed_checks', [])
-    data['results'].setdefault('passed_checks', [])
-    json.dump(data, open('scan_results/checkov-results.json', 'w'), indent=2)
-except Exception as e:
-    print(f'Normalizing checkov output failed ({e}) - writing empty result')
-    json.dump({'results': {'failed_checks': [], 'passed_checks': []}, 'summary': {'failed': 0, 'passed': 0}}, open('scan_results/checkov-results.json', 'w'))
-PYEOF
+        run: python3 .github/scripts/normalize_checkov.py
 
       - name: tfsec - IaC Security Scan
         run: |
@@ -315,14 +236,7 @@ PYEOF
             -o /usr/local/bin/tfsec && chmod +x /usr/local/bin/tfsec || true
           mkdir -p scan_results
           /usr/local/bin/tfsec ./terraform --format json 2>/dev/null > scan_results/tfsec-results.json || true
-          python3 - << 'PYEOF'
-import json
-try:
-    data = json.load(open('scan_results/tfsec-results.json'))
-    print(f'tfsec: {len(data.get("results", []))} findings')
-except Exception as e:
-    print(f'tfsec parse error: {e}')
-PYEOF
+          python3 -c "import json; d=json.load(open('scan_results/tfsec-results.json')); print('tfsec: ' + str(len(d.get('results',[]))) + ' findings')" 2>/dev/null || true
         continue-on-error: true
 
       - name: IaC - Ensure All Outputs Exist
@@ -366,11 +280,7 @@ PYEOF
           mkdir -p scan_results
           [ -s scan_results/sbom-cyclonedx.json ] || echo '{"bomFormat":"CycloneDX","specVersion":"1.4","components":[]}' > scan_results/sbom-cyclonedx.json
           [ -s scan_results/sbom-spdx.json ]      || echo '{"spdxVersion":"SPDX-2.3","packages":[]}' > scan_results/sbom-spdx.json
-          python3 - << 'PYEOF'
-import json
-cdx = json.load(open('scan_results/sbom-cyclonedx.json'))
-print(f'SBOM CycloneDX: {len(cdx.get("components", []))} components')
-PYEOF
+          python3 -c "import json; d=json.load(open('scan_results/sbom-cyclonedx.json')); print('SBOM CycloneDX: ' + str(len(d.get('components',[]))) + ' components')" 2>/dev/null || true
 
       - uses: actions/upload-artifact@v4
         with:
@@ -404,32 +314,13 @@ PYEOF
       - name: Docker Bench Security
         run: |
           mkdir -p scan_results
-          cat > /tmp/bench_parse.py << 'PYEOF'
-import sys, json
-lines = sys.stdin.readlines()
-buckets = {'PASS': [], 'WARN': [], 'FAIL': [], 'INFO': [], 'NOTE': []}
-for line in lines:
-    stripped = line.strip()
-    for status in buckets:
-        if f'[{status}]' in stripped:
-            buckets[status].append(stripped)
-            break
-result = {
-    'tool': 'docker-bench-security',
-    'summary': {k: len(v) for k, v in buckets.items()},
-    'findings': [{'status': s, 'description': d} for s, items in buckets.items() for d in items]
-}
-json.dump(result, open('scan_results/docker-bench-results.json', 'w'), indent=2)
-total = sum(len(v) for v in buckets.values())
-print(f'Docker Bench: WARN={len(buckets["WARN"])} FAIL={len(buckets["FAIL"])} total={total}')
-PYEOF
           docker run --rm --net host --pid host \
             --cap-add audit_control \
             -v /etc:/etc:ro \
             -v /var/lib:/var/lib:ro \
             -v /var/run/docker.sock:/var/run/docker.sock:ro \
             --label docker_bench_security \
-            docker/docker-bench-security 2>&1 | python3 /tmp/bench_parse.py || \
+            docker/docker-bench-security 2>&1 | python3 .github/scripts/parse_docker_bench.py || \
             echo '{"tool":"docker-bench-security","summary":{},"findings":[]}' > scan_results/docker-bench-results.json
         continue-on-error: true
 
@@ -492,17 +383,7 @@ PYEOF
               break
             fi
           done
-          python3 - << 'PYEOF'
-import json
-try:
-    data = json.load(open('scan_results/zap-results.json'))
-    sites = data.get('site', [])
-    alerts = sum(len(s.get('alerts', [])) for s in sites)
-    print(f'ZAP: {len(sites)} sites, {alerts} alert types')
-except Exception as e:
-    print(f'ZAP JSON invalid ({e}) - resetting')
-    json.dump({'site': []}, open('scan_results/zap-results.json', 'w'))
-PYEOF
+          python3 -c "import json; d=json.load(open('scan_results/zap-results.json')); a=sum(len(s.get('alerts',[]))for s in d.get('site',[])); print('ZAP: '+str(a)+' alerts')" 2>/dev/null || echo '{"site":[]}' > scan_results/zap-results.json
         continue-on-error: true
 
       - name: Nuclei DAST Scan (v3)
@@ -516,30 +397,7 @@ PYEOF
       - name: Nuclei - Normalize JSONL to JSON Array
         run: |
           mkdir -p scan_results
-          python3 - << 'PYEOF'
-import json, os
-findings = []
-for path in ["scan_results/nuclei-raw.jsonl", "scan_results/nuclei-results.json"]:
-    if not os.path.exists(path):
-        continue
-    with open(path) as f:
-        content = f.read().strip()
-    if not content:
-        continue
-    for line in content.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            findings.append(json.loads(line))
-        except Exception:
-            pass
-    if findings:
-        break
-with open("scan_results/nuclei-results.json", "w") as f:
-    json.dump(findings, f, indent=2)
-print(f"Nuclei: {len(findings)} findings normalized")
-PYEOF
+          python3 .github/scripts/normalize_nuclei.py
         continue-on-error: true
 
       - name: Shannon AI Endpoint Pentester
@@ -552,87 +410,7 @@ PYEOF
       - name: OWASP API Security Top 10 Check
         run: |
           pip install requests -q
-          python3 - << 'PYEOF'
-import json, requests
-from urllib3.exceptions import InsecureRequestWarning
-requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
-
-TARGET = "http://localhost:3000"
-findings = []
-
-def req(method, path, **kw):
-    try:
-        return getattr(requests, method)(f"{TARGET}{path}", timeout=5, verify=False, **kw)
-    except Exception:
-        return None
-
-r = req("get", "/api/Users")
-if r and r.status_code == 200:
-    try:
-        data = r.json()
-        count = len(data.get("data", []))
-        if count:
-            findings.append({
-                "endpoint": "/api/Users", "method": "GET", "severity": "CRITICAL",
-                "vulnerability": "API1:2023 - Broken Object Level Authorization (BOLA)",
-                "detail": f"Unauthenticated request returns {count} full user records",
-                "cwe": "CWE-639", "owasp_api": "API1:2023"
-            })
-    except Exception:
-        pass
-
-for i in range(6):
-    req("post", "/rest/user/login", json={"email": "admin@juice-sh.op", "password": f"brute{i}"})
-findings.append({
-    "endpoint": "/rest/user/login", "method": "POST", "severity": "HIGH",
-    "vulnerability": "API2:2023 - Broken Authentication (No Rate Limiting on Login)",
-    "detail": "Sent 6 consecutive login attempts with no lockout or throttling response",
-    "cwe": "CWE-307", "owasp_api": "API2:2023"
-})
-
-r = req("get", "/api/Products")
-if r and r.status_code == 200:
-    try:
-        items = r.json().get("data", [])
-        keys = set(k for item in items for k in item.keys()) if items else set()
-        exposed = keys & {"deletedAt", "createdAt", "updatedAt"}
-        if exposed:
-            findings.append({
-                "endpoint": "/api/Products", "method": "GET", "severity": "MEDIUM",
-                "vulnerability": "API3:2023 - Broken Object Property Level Authorization",
-                "detail": f"Internal fields exposed: {', '.join(sorted(exposed))}",
-                "cwe": "CWE-200", "owasp_api": "API3:2023"
-            })
-    except Exception:
-        pass
-
-r = req("get", "/")
-if r:
-    required = ["Content-Security-Policy", "X-Content-Type-Options", "Strict-Transport-Security", "X-Frame-Options", "Permissions-Policy"]
-    missing = [h for h in required if h not in r.headers]
-    if missing:
-        findings.append({
-            "endpoint": "/", "method": "GET", "severity": "MEDIUM",
-            "vulnerability": "API7:2023 - Security Misconfiguration (Missing HTTP Security Headers)",
-            "detail": f"Missing headers: {', '.join(missing)}",
-            "cwe": "CWE-16", "owasp_api": "API7:2023"
-        })
-
-result = {
-    "tool": "OWASP-API-Security-Top10",
-    "target": TARGET,
-    "findings": findings,
-    "summary": {
-        "CRITICAL": sum(1 for f in findings if f["severity"] == "CRITICAL"),
-        "HIGH":     sum(1 for f in findings if f["severity"] == "HIGH"),
-        "MEDIUM":   sum(1 for f in findings if f["severity"] == "MEDIUM"),
-        "LOW":      sum(1 for f in findings if f["severity"] == "LOW"),
-    }
-}
-with open("scan_results/owasp-api-results.json", "w") as f:
-    json.dump(result, f, indent=2)
-print(f"OWASP API Top 10: {len(findings)} findings")
-PYEOF
+          python3 .github/scripts/owasp_api_check.py
         continue-on-error: true
 
       - name: DAST - Ensure All Outputs Exist
@@ -683,35 +461,7 @@ PYEOF
           ls -la scan_results/ | grep -v '^total' | awk '{print $NF, $5}'
 
       - name: Build Scan Manifest (SOC2 Evidence)
-        run: |
-          python3 - << 'PYEOF'
-import json, os, datetime, hashlib
-files = []
-for fname in sorted(os.listdir("scan_results")):
-    if not fname.endswith(".json"):
-        continue
-    fpath = f"scan_results/{fname}"
-    size = os.path.getsize(fpath)
-    with open(fpath, "rb") as f:
-        sha256 = hashlib.sha256(f.read()).hexdigest()
-    files.append({"file": fname, "size_bytes": size, "sha256": sha256})
-manifest = {
-    "schema_version": "2.0",
-    "pipeline": "Enterprise DevSecOps Platform v2",
-    "commit_sha": "${{ github.sha }}",
-    "run_id": "${{ github.run_id }}",
-    "run_number": "${{ github.run_number }}",
-    "branch": "${{ github.ref_name }}",
-    "actor": "${{ github.actor }}",
-    "repository": "${{ github.repository }}",
-    "timestamp_utc": datetime.datetime.utcnow().isoformat() + "Z",
-    "scan_file_count": len(files),
-    "scan_files": files
-}
-with open("scan_results/manifest.json", "w") as f:
-    json.dump(manifest, f, indent=2)
-print(f"Manifest: {len(files)} scan files with SHA256 checksums")
-PYEOF
+        run: python3 .github/scripts/build_manifest.py
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -764,18 +514,7 @@ PYEOF
           echo "=== Lambda Response ==="
           cat lambda_response.json
           echo ""
-          python3 - << 'PYEOF'
-import base64, json
-with open("lambda_meta.json") as f:
-    meta = json.load(f)
-if "LogResult" in meta:
-    logs = base64.b64decode(meta["LogResult"]).decode("utf-8", errors="replace")
-    print("=== Lambda Execution Logs ===")
-    print(logs)
-if "FunctionError" in meta:
-    print(f"Lambda FunctionError: {meta['FunctionError']}")
-    import sys; sys.exit(1)
-PYEOF
+          python3 .github/scripts/parse_lambda_response.py
         continue-on-error: true
 
       - name: Download PDF from S3
@@ -805,109 +544,8 @@ PYEOF
           retention-days: 90
 
       - name: Security Gate Check
-        run: |
-          python3 - << 'PYEOF'
-import json, os
-warnings = []
-try:
-    data = json.load(open("scan_results/gitleaks-results.json"))
-    count = len(data) if isinstance(data, list) else 0
-    if count:
-        warnings.append(f"Gitleaks: {count} secrets/credentials detected in repository")
-except Exception:
-    pass
-try:
-    data = json.load(open("scan_results/trufflehog-results.json"))
-    count = len(data) if isinstance(data, list) else 0
-    if count:
-        warnings.append(f"TruffleHog: {count} verified/unverified secrets detected")
-except Exception:
-    pass
-try:
-    data = json.load(open("scan_results/trivy-fs-results.json"))
-    crits = sum(1 for r in data.get("Results", []) for v in r.get("Vulnerabilities", []) if v.get("Severity") == "CRITICAL")
-    if crits > 0:
-        warnings.append(f"Trivy: {crits} critical CVEs in dependencies")
-except Exception:
-    pass
-try:
-    data = json.load(open("scan_results/owasp-api-results.json"))
-    crits = sum(1 for f in data.get("findings", []) if f.get("severity") == "CRITICAL")
-    if crits > 0:
-        warnings.append(f"OWASP API: {crits} critical API security issues")
-except Exception:
-    pass
-print("=" * 65)
-print("SECURITY GATE RESULTS")
-print("=" * 65)
-print("Target: OWASP Juice Shop (intentionally vulnerable app)")
-print()
-if warnings:
-    print("STATUS: WARNINGS DETECTED (not blocking - educational target)")
-    for w in warnings:
-        print(f"  [WARN] {w}")
-else:
-    print("STATUS: PASS - No gate violations")
-print()
-print("Full report: GitHub Artifacts -> security-report-pdf")
-print("=" * 65)
-PYEOF
+        run: python3 .github/scripts/security_gate.py
 
       - name: Print Scan Summary Table
         if: always()
-        run: |
-          python3 - << 'PYEOF'
-import json, os
-
-def load(path, fn):
-    try:
-        return fn(json.load(open(path)))
-    except Exception:
-        return "ERR"
-
-rows = [
-    ("Gitleaks",         "scan_results/gitleaks-results.json",
-     lambda d: f"{len(d) if isinstance(d, list) else 0} secrets"),
-    ("TruffleHog",       "scan_results/trufflehog-results.json",
-     lambda d: f"{len(d) if isinstance(d, list) else 0} secrets"),
-    ("Semgrep",          "scan_results/semgrep-results.json",
-     lambda d: f"{len(d.get('results', []))} findings"),
-    ("SonarQube",        "scan_results/sonarqube-results.json",
-     lambda d: f"{d.get('paging', {}).get('total', len(d.get('issues', [])))} issues"),
-    ("Trivy (fs)",       "scan_results/trivy-fs-results.json",
-     lambda d: f"{sum(len(r.get('Vulnerabilities', [])) for r in d.get('Results', []))} vulns"),
-    ("npm audit",        "scan_results/npm-audit-results.json",
-     lambda d: f"{d.get('metadata', {}).get('vulnerabilities', {}).get('total', '?')} vulns"),
-    ("Grype",            "scan_results/grype-results.json",
-     lambda d: f"{len(d.get('matches', []))} matches"),
-    ("Checkov",          "scan_results/checkov-results.json",
-     lambda d: f"{len(d.get('results', {}).get('failed_checks', []))} failed"),
-    ("tfsec",            "scan_results/tfsec-results.json",
-     lambda d: f"{len(d.get('results', []))} findings"),
-    ("Trivy (image)",    "scan_results/trivy-image-results.json",
-     lambda d: f"{sum(len(r.get('Vulnerabilities', [])) for r in d.get('Results', []))} vulns"),
-    ("Docker Bench",     "scan_results/docker-bench-results.json",
-     lambda d: f"WARN:{d.get('summary', {}).get('WARN', 0)} FAIL:{d.get('summary', {}).get('FAIL', 0)}"),
-    ("ZAP",              "scan_results/zap-results.json",
-     lambda d: f"{sum(len(s.get('alerts', [])) for s in d.get('site', []))} alert types"),
-    ("Nuclei",           "scan_results/nuclei-results.json",
-     lambda d: f"{len(d) if isinstance(d, list) else 0} findings"),
-    ("Shannon AI",       "scan_results/shannon-results.json",
-     lambda d: f"{len(d.get('findings', []))} findings"),
-    ("OWASP API Top 10", "scan_results/owasp-api-results.json",
-     lambda d: f"{len(d.get('findings', []))} findings"),
-]
-print()
-print("+--------------------------+----------------------------------+")
-print("|  ENTERPRISE DEVSECOPS PLATFORM - SCAN SUMMARY             |")
-print("+--------------------------+----------------------------------+")
-print("| Tool                     | Result                           |")
-print("+--------------------------+----------------------------------+")
-for tool, path, fn in rows:
-    result = load(path, fn)
-    ok = result != "ERR"
-    icon = "+" if ok else "-"
-    print(f"| [{icon}] {tool:<22}| {str(result):<33}|")
-print("+--------------------------+----------------------------------+")
-print()
-PYEOF
+        run: python3 .github/scripts/print_summary.py
