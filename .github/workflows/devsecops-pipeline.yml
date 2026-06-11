@@ -134,12 +134,25 @@ jobs:
           LAMBDA="${{ secrets.LAMBDA_FUNCTION_NAME }}"
           if [ -z "$LAMBDA" ]; then echo "Missing LAMBDA_FUNCTION_NAME secret. Skipping Lambda."; exit 0; fi
           
+          echo "Invoking Lambda $LAMBDA..."
           aws lambda invoke \
             --function-name $LAMBDA \
             --payload '{"commit_sha": "${{ github.sha }}"}' \
             --cli-binary-format raw-in-base64-out \
-            response.json
+            --log-type Tail \
+            response.json > invoke_metadata.json
+          
+          echo "--- Lambda Payload Response ---"
           cat response.json
+          echo ""
+          
+          if grep -q "FunctionError" invoke_metadata.json; then
+            echo "❌ Lambda function failed!"
+            echo "--- Execution Log ---"
+            jq -r '.LogResult' invoke_metadata.json | base64 --decode
+            exit 1
+          fi
+          echo "✅ Lambda generated PDF successfully!"
         continue-on-error: true
 
       - name: Upload Local JSON Artifacts (Fallback)

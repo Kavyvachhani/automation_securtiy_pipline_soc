@@ -27,6 +27,10 @@ jobs:
         with:
           terraform_version: "1.5.0"
 
+      - name: Install Lambda Dependencies
+        working-directory: ./lambda
+        run: pip install fpdf2 -t .
+
       - name: Terraform Init
         working-directory: ./terraform
         run: terraform init
