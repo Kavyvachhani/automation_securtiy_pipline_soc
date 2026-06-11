@@ -495,6 +495,25 @@ jobs:
           echo "Upload complete: $SUCCESS succeeded, $FAIL failed"
         continue-on-error: true
 
+      - name: Package and Deploy Lambda
+        run: |
+          LAMBDA="${{ secrets.LAMBDA_FUNCTION_NAME }}"
+          if [ -z "$LAMBDA" ]; then
+            echo "LAMBDA_FUNCTION_NAME not set - skipping"
+            exit 0
+          fi
+          rm -rf lambda_package lambda_function.zip
+          pip install fpdf2 -t lambda_package/ -q
+          cp lambda/generate_report.py lambda_package/
+          cd lambda_package && zip -r ../lambda_function.zip . -q && cd ..
+          aws lambda update-function-code \
+            --function-name "$LAMBDA" \
+            --zip-file fileb://lambda_function.zip \
+            --no-cli-pager 2>&1 | tail -5
+          aws lambda wait function-updated --function-name "$LAMBDA" --no-cli-pager 2>&1 || true
+          echo "Lambda deployed"
+        continue-on-error: true
+
       - name: Invoke Lambda Report Generator
         run: |
           LAMBDA="${{ secrets.LAMBDA_FUNCTION_NAME }}"
