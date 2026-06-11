@@ -104,7 +104,6 @@ jobs:
         uses: projectdiscovery/nuclei-action@main
         with:
           target: http://localhost:3000
-          json: true
           output: scan_results/nuclei-results.json
         continue-on-error: true
 
