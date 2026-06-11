@@ -24,12 +24,8 @@ variable "aws_region" {
   default     = "us-east-1"
 }
 
-resource "random_id" "bucket_id" {
-  byte_length = 4
-}
-
 resource "aws_s3_bucket" "devsecops_vault" {
-  bucket = "devsecops-results-vault-${random_id.bucket_id.hex}"
+  bucket = "devsecops-results-vault-kavy-soc-2026"
 }
 
 resource "aws_s3_bucket_public_access_block" "devsecops_vault_block" {
@@ -41,7 +37,7 @@ resource "aws_s3_bucket_public_access_block" "devsecops_vault_block" {
 }
 
 resource "aws_iam_role" "lambda_exec_role" {
-  name = "devsecops_lambda_role_${random_id.bucket_id.hex}"
+  name = "devsecops_lambda_role_kavy_soc"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -56,7 +52,7 @@ resource "aws_iam_role" "lambda_exec_role" {
 }
 
 resource "aws_iam_policy" "lambda_s3_policy" {
-  name = "devsecops_lambda_s3_policy_${random_id.bucket_id.hex}"
+  name = "devsecops_lambda_s3_policy_kavy_soc"
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -99,7 +95,7 @@ data "archive_file" "lambda_zip" {
 
 resource "aws_lambda_function" "generate_report_lambda" {
   filename         = data.archive_file.lambda_zip.output_path
-  function_name    = "DevSecOpsReportGenerator_${random_id.bucket_id.hex}"
+  function_name    = "DevSecOpsReportGenerator"
   role             = aws_iam_role.lambda_exec_role.arn
   handler          = "generate_report.handler"
   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
