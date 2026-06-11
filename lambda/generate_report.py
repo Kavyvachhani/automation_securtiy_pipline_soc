@@ -1,5 +1,5 @@
 """
-Enterprise DevSecOps Report Generator — Lambda v2
+Enterprise DevSecOps Report Generator - Lambda v2
 Parses 15 scanner outputs, scores risk, maps to compliance frameworks,
 and generates a multi-section SOC2-grade PDF report.
 """
@@ -14,11 +14,11 @@ from fpdf.enums import XPos, YPos
 s3 = boto3.client("s3")
 BUCKET = os.environ.get("S3_BUCKET", "")
 
-# ─── SEVERITY CONSTANTS ───────────────────────────────────────
+# --- SEVERITY CONSTANTS ---------------------------------------
 SEV_ORDER = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4, "UNKNOWN": 5}
 SEV_SCORE = {"CRITICAL": 40, "HIGH": 15, "MEDIUM": 5, "LOW": 1, "INFO": 0, "UNKNOWN": 0}
 
-# ─── COMPLIANCE MAPPINGS ─────────────────────────────────────
+# --- COMPLIANCE MAPPINGS -------------------------------------
 CWE_SOC2 = {
     "CWE-78": "CC6.1", "CWE-79": "CC6.1", "CWE-89": "CC6.1",
     "CWE-200": "CC6.7", "CWE-312": "CC6.7", "CWE-798": "CC6.2",
@@ -36,7 +36,7 @@ CWE_NIST = {
     "CWE-639": "AC-3", "CWE-16": "CM-6",
 }
 
-# ─── S3 HELPERS ──────────────────────────────────────────────
+# --- S3 HELPERS ----------------------------------------------
 def get_s3_json(key):
     try:
         obj = s3.get_object(Bucket=BUCKET, Key=key)
@@ -50,9 +50,9 @@ def safe_str(val, maxlen=90):
     if val is None:
         return ""
     s = str(val).replace("\n", " ").replace("\r", " ").strip()
-    return s[:maxlen] + "…" if len(s) > maxlen else s
+    return s[:maxlen] + "..." if len(s) > maxlen else s
 
-# ─── NORMALISED FINDING ──────────────────────────────────────
+# --- NORMALISED FINDING --------------------------------------
 def finding(tool, sev, title, rule_id="", file_path="", line=0,
             cwe="", owasp="", detail="", endpoint=""):
     sev = sev.upper() if sev else "UNKNOWN"
@@ -69,7 +69,7 @@ def finding(tool, sev, title, rule_id="", file_path="", line=0,
         "endpoint": safe_str(endpoint, 50),
     }
 
-# ─── PARSERS ─────────────────────────────────────────────────
+# --- PARSERS -------------------------------------------------
 
 def parse_gitleaks(data):
     """Binary JSON: array of leak objects"""
@@ -85,7 +85,7 @@ def parse_gitleaks(data):
             file_path=item.get("File", ""),
             line=item.get("StartLine", 0),
             cwe="CWE-798",
-            detail=f"Commit {str(item.get('Commit',''))[:7]} by {item.get('Author','')} — {item.get('Description','')}"
+            detail=f"Commit {str(item.get('Commit',''))[:7]} by {item.get('Author','')} - {item.get('Description','')}"
         ))
     return findings
 
@@ -111,7 +111,7 @@ def parse_trufflehog(data):
             file_path=fpath,
             line=line,
             cwe="CWE-798",
-            detail=f"Verified={verified} Raw={str(item.get('Raw',''))[:30]}…"
+            detail=f"Verified={verified} Raw={str(item.get('Raw',''))[:30]}..."
         ))
     return findings
 
@@ -124,7 +124,7 @@ def parse_semgrep(data):
     for r in data["results"]:
         extra = r.get("extra", {})
         raw_sev = extra.get("severity", "INFO").upper()
-        # Semgrep uses ERROR/WARNING/INFO — map to standard
+        # Semgrep uses ERROR/WARNING/INFO - map to standard
         sev_map = {"ERROR": "HIGH", "WARNING": "MEDIUM", "INFO": "LOW"}
         sev = sev_map.get(raw_sev, raw_sev)
         # If semgrep returns HIGH/CRITICAL directly, keep it
@@ -417,7 +417,7 @@ def parse_docker_bench(data):
     return findings
 
 
-# ─── RISK SCORING ────────────────────────────────────────────
+# --- RISK SCORING --------------------------------------------
 
 def calculate_risk_score(all_findings):
     if not all_findings:
@@ -440,7 +440,7 @@ def severity_counts(findings):
     return dict(counts)
 
 
-# ─── PDF GENERATION ──────────────────────────────────────────
+# --- PDF GENERATION ------------------------------------------
 
 class SecurityPDF(FPDF):
     def __init__(self):
@@ -457,7 +457,7 @@ class SecurityPDF(FPDF):
         self.set_font("Helvetica", "B", 7)
         self.set_text_color(180, 180, 180)
         self.set_y(2)
-        self.cell(0, 6, f"CONFIDENTIAL — DevSecOps Security Report  |  OWASP Juice Shop", align="C",
+        self.cell(0, 6, f"CONFIDENTIAL - DevSecOps Security Report  |  OWASP Juice Shop", align="C",
                   new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         self.set_text_color(0, 0, 0)
         self.set_y(12)
@@ -491,7 +491,7 @@ class SecurityPDF(FPDF):
                   new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         self.set_font("Helvetica", "", 11)
         self.set_text_color(148, 163, 184)
-        self.cell(0, 8, "DevSecOps Platform — OWASP Juice Shop", align="C",
+        self.cell(0, 8, "DevSecOps Platform - OWASP Juice Shop", align="C",
                   new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         self.set_text_color(0, 0, 0)
         self.set_y(70)
@@ -506,7 +506,7 @@ class SecurityPDF(FPDF):
             ("Run ID",      meta["run_id"]),
             ("Pipeline",    "Enterprise DevSecOps Platform v2"),
             ("Target",      "OWASP Juice Shop (Intentionally Vulnerable)"),
-            ("Classification", "CONFIDENTIAL — SOC2 Audit Evidence"),
+            ("Classification", "CONFIDENTIAL - SOC2 Audit Evidence"),
         ]
         for label, value in rows:
             self.set_font("Helvetica", "B", 9)
@@ -615,7 +615,7 @@ class SecurityPDF(FPDF):
             tool_str = "  "
             for t in tools:
                 has = any(t.lower() in tf.lower() for tf in tools_with_findings)
-                tool_str += f"[{'✓' if has else '·'}] {t}  "
+                tool_str += f"[{'[OK]' if has else '·'}] {t}  "
             self.set_fill_color(248, 250, 252)
             self.set_font("Helvetica", "B", 9)
             self.cell(col_w2[0], 7, f"  {cat}", fill=True, border=1)
@@ -632,9 +632,9 @@ class SecurityPDF(FPDF):
         self.ln(2)
         comp_rows = [
             ("SOC2 Type II",    f"{compliance_pct}% posture  ({soc2_mapped} findings mapped to Trust Service Criteria)"),
-            ("ISO 27001",       f"Risk-based assessment required — {crits + highs} high-impact findings to address"),
-            ("NIST 800-53",     f"AC/IA/SI controls affected — {len([f for f in all_findings if f.get('nist')])} mapped findings"),
-            ("OWASP ASVS",      f"Verification Level 2 target — {len([f for f in all_findings if f.get('owasp')])} OWASP-mapped findings"),
+            ("ISO 27001",       f"Risk-based assessment required - {crits + highs} high-impact findings to address"),
+            ("NIST 800-53",     f"AC/IA/SI controls affected - {len([f for f in all_findings if f.get('nist')])} mapped findings"),
+            ("OWASP ASVS",      f"Verification Level 2 target - {len([f for f in all_findings if f.get('owasp')])} OWASP-mapped findings"),
             ("CIS Controls",    f"CIS v8 coverage: Secrets(CS1), Vuln Mgmt(CS7), AppSec(CS16)"),
         ]
         self.set_fill_color(30, 41, 59)
@@ -672,7 +672,7 @@ class SecurityPDF(FPDF):
         self.set_font("Helvetica", "B", 9)
         if not findings:
             self.set_fill_color(220, 252, 231)
-            self.cell(0, 8, "  No findings detected — PASS", fill=True,
+            self.cell(0, 8, "  No findings detected - PASS", fill=True,
                       new_x=XPos.LMARGIN, new_y=YPos.NEXT)
             self.ln(3)
             return
@@ -732,7 +732,7 @@ class SecurityPDF(FPDF):
 
     def compliance_section(self, all_findings):
         self.add_page()
-        self.section_header("COMPLIANCE MAPPING — SOC2 / ISO27001 / NIST / OWASP")
+        self.section_header("COMPLIANCE MAPPING - SOC2 / ISO27001 / NIST / OWASP")
 
         # Group by SOC2 criteria
         by_soc2 = defaultdict(list)
@@ -740,13 +740,13 @@ class SecurityPDF(FPDF):
             by_soc2[f.get("soc2") or "Unmapped"].append(f)
 
         soc2_labels = {
-            "CC6.1": "CC6.1 — Logical Access Controls",
-            "CC6.2": "CC6.2 — Credentials and Authentication",
-            "CC6.3": "CC6.3 — Access Privileges",
-            "CC6.6": "CC6.6 — Protection Against Threats",
-            "CC6.7": "CC6.7 — Data Transmission and Disposal",
-            "CC6.8": "CC6.8 — Prevention of Unauthorized Software",
-            "Unmapped": "Unmapped — General Security Findings",
+            "CC6.1": "CC6.1 - Logical Access Controls",
+            "CC6.2": "CC6.2 - Credentials and Authentication",
+            "CC6.3": "CC6.3 - Access Privileges",
+            "CC6.6": "CC6.6 - Protection Against Threats",
+            "CC6.7": "CC6.7 - Data Transmission and Disposal",
+            "CC6.8": "CC6.8 - Prevention of Unauthorized Software",
+            "Unmapped": "Unmapped - General Security Findings",
         }
         col_w = [45, 20, 115]
         self.set_fill_color(30, 41, 59)
@@ -778,16 +778,16 @@ class SecurityPDF(FPDF):
         for f in all_findings:
             by_owasp[f.get("owasp") or "N/A"].append(f)
         owasp_labels = {
-            "A01": "A01 — Broken Access Control",
-            "A02": "A02 — Cryptographic Failures",
-            "A03": "A03 — Injection",
-            "A04": "A04 — Insecure Design",
-            "A05": "A05 — Security Misconfiguration",
-            "A06": "A06 — Vulnerable and Outdated Components",
-            "A07": "A07 — Identification and Authentication Failures",
-            "A08": "A08 — Software and Data Integrity Failures",
-            "A09": "A09 — Security Logging and Monitoring Failures",
-            "A10": "A10 — Server-Side Request Forgery",
+            "A01": "A01 - Broken Access Control",
+            "A02": "A02 - Cryptographic Failures",
+            "A03": "A03 - Injection",
+            "A04": "A04 - Insecure Design",
+            "A05": "A05 - Security Misconfiguration",
+            "A06": "A06 - Vulnerable and Outdated Components",
+            "A07": "A07 - Identification and Authentication Failures",
+            "A08": "A08 - Software and Data Integrity Failures",
+            "A09": "A09 - Security Logging and Monitoring Failures",
+            "A10": "A10 - Server-Side Request Forgery",
             "N/A": "Not mapped to OWASP Top 10",
         }
         col_w2 = [60, 20, 100]
@@ -812,7 +812,7 @@ class SecurityPDF(FPDF):
 
     def appendix(self, meta, scan_files):
         self.add_page()
-        self.section_header("APPENDIX — EVIDENCE COLLECTION")
+        self.section_header("APPENDIX - EVIDENCE COLLECTION")
         self.set_font("Helvetica", "B", 10)
         self.cell(0, 7, "SCAN METADATA", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         self.ln(2)
@@ -848,7 +848,7 @@ class SecurityPDF(FPDF):
                       new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
 
-# ─── ORCHESTRATOR ────────────────────────────────────────────
+# --- ORCHESTRATOR --------------------------------------------
 
 def handler(event, context):
     print(f"[Lambda] Event: {json.dumps(event)}")
@@ -862,7 +862,7 @@ def handler(event, context):
     prefix = f"scans/{commit_sha}"
     timestamp = datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC")
 
-    # ── Load all scan files ────────────────────────────────
+    # -- Load all scan files --------------------------------
     loaders = {
         "gitleaks":    get_s3_json(f"{prefix}/gitleaks-results.json"),
         "trufflehog":  get_s3_json(f"{prefix}/trufflehog-results.json"),
@@ -882,23 +882,23 @@ def handler(event, context):
         "manifest":    get_s3_json(f"{prefix}/manifest.json"),
     }
 
-    # ── Parse all scanner outputs ──────────────────────────
+    # -- Parse all scanner outputs --------------------------
     all_findings_by_tool = {
-        "Secret Scanning — Gitleaks":        parse_gitleaks(loaders["gitleaks"]),
-        "Secret Scanning — TruffleHog":      parse_trufflehog(loaders["trufflehog"]),
-        "SAST — Semgrep":                    parse_semgrep(loaders["semgrep"]),
-        "SAST — SonarQube":                  parse_sonarqube(loaders["sonarqube"]),
-        "SCA — Trivy (Filesystem)":          parse_trivy(loaders["trivy_fs"], "Trivy-FS"),
-        "SCA — Trivy (Container Image)":     parse_trivy(loaders["trivy_img"], "Trivy-Image"),
-        "SCA — Grype":                       parse_grype(loaders["grype"]),
-        "SCA — npm audit":                   parse_npm_audit(loaders["npm_audit"]),
-        "IaC Security — Checkov":            parse_checkov(loaders["checkov"]),
-        "IaC Security — tfsec":              parse_tfsec(loaders["tfsec"]),
-        "Container — Docker Bench Security": parse_docker_bench(loaders["docker_bench"]),
-        "DAST — OWASP ZAP":                  parse_zap(loaders["zap"]),
-        "DAST — Nuclei":                     parse_nuclei(loaders["nuclei"]),
-        "API Security — Shannon AI":         parse_shannon(loaders["shannon"]),
-        "API Security — OWASP API Top 10":   parse_owasp_api(loaders["owasp_api"]),
+        "Secret Scanning - Gitleaks":        parse_gitleaks(loaders["gitleaks"]),
+        "Secret Scanning - TruffleHog":      parse_trufflehog(loaders["trufflehog"]),
+        "SAST - Semgrep":                    parse_semgrep(loaders["semgrep"]),
+        "SAST - SonarQube":                  parse_sonarqube(loaders["sonarqube"]),
+        "SCA - Trivy (Filesystem)":          parse_trivy(loaders["trivy_fs"], "Trivy-FS"),
+        "SCA - Trivy (Container Image)":     parse_trivy(loaders["trivy_img"], "Trivy-Image"),
+        "SCA - Grype":                       parse_grype(loaders["grype"]),
+        "SCA - npm audit":                   parse_npm_audit(loaders["npm_audit"]),
+        "IaC Security - Checkov":            parse_checkov(loaders["checkov"]),
+        "IaC Security - tfsec":              parse_tfsec(loaders["tfsec"]),
+        "Container - Docker Bench Security": parse_docker_bench(loaders["docker_bench"]),
+        "DAST - OWASP ZAP":                  parse_zap(loaders["zap"]),
+        "DAST - Nuclei":                     parse_nuclei(loaders["nuclei"]),
+        "API Security - Shannon AI":         parse_shannon(loaders["shannon"]),
+        "API Security - OWASP API Top 10":   parse_owasp_api(loaders["owasp_api"]),
     }
 
     all_findings = [f for findings in all_findings_by_tool.values() for f in findings]
@@ -924,27 +924,27 @@ def handler(event, context):
 
     scan_files = loaders["manifest"].get("scan_files", []) if loaders["manifest"] else []
 
-    # ── Build PDF ─────────────────────────────────────────
+    # -- Build PDF -----------------------------------------
     pdf = SecurityPDF()
     pdf.cover_page(meta)
     pdf.executive_summary(all_findings, score, grade, meta)
 
     tool_descriptions = {
-        "Secret Scanning — Gitleaks":        "Detects credentials, API keys, tokens, and private keys committed to git history.",
-        "Secret Scanning — TruffleHog":      "Deep entropy and regex scanning with secret verification against service APIs.",
-        "SAST — Semgrep":                    "Pattern-based static analysis: SQL injection, XSS, eval injection, hardcoded secrets.",
-        "SAST — SonarQube":                  "Enterprise SAST platform: bugs, code smells, security hotspots, coverage.",
-        "SCA — Trivy (Filesystem)":          "Dependency CVE scanning across npm, pip, go, maven package manifests.",
-        "SCA — Trivy (Container Image)":     "Container image layer-by-layer CVE scan including OS packages.",
-        "SCA — Grype":                       "Anchore Grype: vulnerability matching against NVD, GitHub Advisory, OSV databases.",
-        "SCA — npm audit":                   "npm official audit against the npm Advisory Database.",
-        "IaC Security — Checkov":            "Terraform / CloudFormation / Kubernetes IaC policy-as-code checks.",
-        "IaC Security — tfsec":              "Terraform-specific security scanner: AWS, GCP, Azure misconfiguration detection.",
-        "Container — Docker Bench Security": "CIS Docker Benchmark: host, daemon, image, container runtime configuration.",
-        "DAST — OWASP ZAP":                  "Active baseline web application scan: headers, XSS, injection, misconfigurations.",
-        "DAST — Nuclei":                     "Template-based scanner: CVE exploitation, misconfiguration, OWASP checks.",
-        "API Security — Shannon AI":         "AI-powered endpoint pentesting: BOLA, auth bypass, rate limiting.",
-        "API Security — OWASP API Top 10":   "OWASP API Security Top 10:2023 automated checks against live endpoints.",
+        "Secret Scanning - Gitleaks":        "Detects credentials, API keys, tokens, and private keys committed to git history.",
+        "Secret Scanning - TruffleHog":      "Deep entropy and regex scanning with secret verification against service APIs.",
+        "SAST - Semgrep":                    "Pattern-based static analysis: SQL injection, XSS, eval injection, hardcoded secrets.",
+        "SAST - SonarQube":                  "Enterprise SAST platform: bugs, code smells, security hotspots, coverage.",
+        "SCA - Trivy (Filesystem)":          "Dependency CVE scanning across npm, pip, go, maven package manifests.",
+        "SCA - Trivy (Container Image)":     "Container image layer-by-layer CVE scan including OS packages.",
+        "SCA - Grype":                       "Anchore Grype: vulnerability matching against NVD, GitHub Advisory, OSV databases.",
+        "SCA - npm audit":                   "npm official audit against the npm Advisory Database.",
+        "IaC Security - Checkov":            "Terraform / CloudFormation / Kubernetes IaC policy-as-code checks.",
+        "IaC Security - tfsec":              "Terraform-specific security scanner: AWS, GCP, Azure misconfiguration detection.",
+        "Container - Docker Bench Security": "CIS Docker Benchmark: host, daemon, image, container runtime configuration.",
+        "DAST - OWASP ZAP":                  "Active baseline web application scan: headers, XSS, injection, misconfigurations.",
+        "DAST - Nuclei":                     "Template-based scanner: CVE exploitation, misconfiguration, OWASP checks.",
+        "API Security - Shannon AI":         "AI-powered endpoint pentesting: BOLA, auth bypass, rate limiting.",
+        "API Security - OWASP API Top 10":   "OWASP API Security Top 10:2023 automated checks against live endpoints.",
     }
 
     for tool_name, findings in all_findings_by_tool.items():
@@ -953,7 +953,7 @@ def handler(event, context):
     pdf.compliance_section(all_findings)
     pdf.appendix(meta, scan_files)
 
-    # ── Save and Upload PDF ────────────────────────────────
+    # -- Save and Upload PDF --------------------------------
     output_pdf = "/tmp/SOC2_DevSecOps_Master_Report.pdf"
     pdf.output(output_pdf)
 
@@ -966,7 +966,7 @@ def handler(event, context):
     s3.upload_file(output_pdf, BUCKET, f"reports/{commit_sha}/SOC2_DevSecOps_Master_Report.pdf",
                    ExtraArgs={"ContentType": "application/pdf"})
 
-    # ── Save JSON Summary ──────────────────────────────────
+    # -- Save JSON Summary ----------------------------------
     summary = {
         "schema_version": "2.0",
         "generated_at": timestamp,
