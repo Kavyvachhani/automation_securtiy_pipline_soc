@@ -1,4 +1,4 @@
-name: DevSecOps Master Pipeline
+name: FAANG-Grade DevSecOps Pipeline
 
 on:
   push:
@@ -7,49 +7,82 @@ on:
 
 jobs:
   security_scans:
-    name: "Run Trivy, Semgrep, and ZAP"
+    name: "Enterprise DevSecOps Suite"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      - name: Install PDF Generator Dependencies
-        run: pip install fpdf2
+      - name: Setup Output Directory
+        run: mkdir -p scan_results
 
-      # --- 1. SCA & Container Scan (Trivy) ---
-      - name: Run Trivy Vulnerability Scanner
+      # --- 1. Secret Scanning ---
+      - name: Gitleaks Scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+      - name: Save Gitleaks Results
+        run: cp results.json scan_results/gitleaks-results.json || true
+        continue-on-error: true
+
+      # --- 2. IaC Scanning ---
+      - name: Checkov IaC Scan
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: .
+          framework: terraform
+          output_format: json
+        continue-on-error: true
+      - name: Save Checkov Results
+        run: cp results_json.json scan_results/checkov-results.json || true
+        continue-on-error: true
+
+      # --- 3. SBOM Generation ---
+      - name: Generate SBOM (Syft)
+        uses: anchore/sbom-action@v0
+        with:
+          path: ./juice-shop
+          format: json
+          output-file: scan_results/sbom-syft.json
+        continue-on-error: true
+
+      # --- 4. SCA Scan ---
+      - name: Trivy Vulnerability Scanner
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'fs'
           scan-ref: './juice-shop'
           format: 'json'
-          output: 'trivy-results.json'
+          output: 'scan_results/trivy-results.json'
           ignore-unfixed: true
           severity: 'CRITICAL,HIGH'
         continue-on-error: true
 
-      # --- 2. SAST Scan (Semgrep) ---
-      - name: Run Semgrep SAST
+      # --- 5. SAST Scan ---
+      - name: Semgrep SAST
         run: |
           pip install semgrep
-          semgrep scan --config auto --json --output semgrep-results.json ./juice-shop
+          semgrep scan --config auto --json --output scan_results/semgrep-results.json ./juice-shop
         continue-on-error: true
 
-      # --- 3. DAST Scan (OWASP ZAP) ---
-      - name: Build and Start OWASP Juice Shop
+      # --- 6. Boot Target Environment ---
+      - name: Boot OWASP Juice Shop
         run: |
           docker pull bkimminich/juice-shop
           docker run -d -p 3000:3000 bkimminich/juice-shop
-          echo "Waiting for Juice Shop to boot..."
+          echo "Waiting for Juice Shop..."
           sleep 15
-          curl -s http://localhost:3000 > /dev/null || sleep 15
 
-      - name: Run OWASP ZAP Baseline Scan
+      # --- 7. DAST Scan (ZAP) ---
+      - name: OWASP ZAP Scan
         uses: zaproxy/action-baseline@v0.14.0
         with:
           target: 'http://localhost:3000'
@@ -57,23 +90,61 @@ jobs:
           allow_issue_writing: false
           fail_action: false
         continue-on-error: true
-
       - name: Save ZAP Results
         run: |
-          # ZAP action saves report_json.json in workspace if generated
           if [ -f report_json.json ]; then
-            cp report_json.json zap-results.json
+            cp report_json.json scan_results/zap-results.json
           else
-            echo '{"site": []}' > zap-results.json
+            echo '{"site": []}' > scan_results/zap-results.json
           fi
         continue-on-error: true
 
-      # --- 4. Master Report Generation ---
-      - name: Generate Master Audit Report (PDF)
-        run: python scripts/generate_security_report.py
+      # --- 8. DAST Scan (Nuclei) ---
+      - name: Nuclei DAST Scan
+        uses: projectdiscovery/nuclei-action@main
+        with:
+          target: http://localhost:3000
+          json: true
+          output: scan_results/nuclei-results.json
+        continue-on-error: true
 
-      - name: Upload Master Audit Report
+      # --- 9. Endpoint Scan (Shannon AI) ---
+      - name: Shannon AI Pentester
+        run: python scripts/shannon_ai_pentester.py --target http://localhost:3000 --output scan_results/shannon-results.json
+        continue-on-error: true
+
+      # --- 10. Upload to AWS S3 & Trigger Lambda ---
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+        continue-on-error: true
+
+      - name: Push Results to S3 Vault
+        run: |
+          BUCKET="${{ secrets.S3_VAULT_BUCKET }}"
+          if [ -z "$BUCKET" ]; then echo "Missing S3_VAULT_BUCKET secret. Skipping upload."; exit 0; fi
+          
+          aws s3 sync scan_results/ s3://$BUCKET/scans/${{ github.sha }}/
+        continue-on-error: true
+
+      - name: Trigger DevSecOps Master Report Lambda
+        run: |
+          LAMBDA="${{ secrets.LAMBDA_FUNCTION_NAME }}"
+          if [ -z "$LAMBDA" ]; then echo "Missing LAMBDA_FUNCTION_NAME secret. Skipping Lambda."; exit 0; fi
+          
+          aws lambda invoke \
+            --function-name $LAMBDA \
+            --payload '{"commit_sha": "${{ github.sha }}"}' \
+            --cli-binary-format raw-in-base64-out \
+            response.json
+          cat response.json
+        continue-on-error: true
+
+      - name: Upload Local JSON Artifacts (Fallback)
         uses: actions/upload-artifact@v4
         with:
-          name: SOC2-DevSecOps-Master-Report
-          path: SOC2_DevSecOps_Master_Report.pdf
+          name: All-Raw-Security-Scans
+          path: scan_results/
