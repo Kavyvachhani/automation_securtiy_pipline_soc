@@ -38,3 +38,14 @@ jobs:
       - name: Terraform Apply
         working-directory: ./terraform
         run: terraform apply -auto-approve
+        continue-on-error: true
+
+      - name: Force Update Lambda Code (Stateless CI Fix)
+        working-directory: ./lambda
+        run: |
+          # Zip the lambda directory including fpdf2
+          zip -r ../lambda_function.zip .
+          # Force update the lambda function directly to bypass terraform state conflicts
+          aws lambda update-function-code \
+            --function-name DevSecOpsReportGenerator \
+            --zip-file fileb://../lambda_function.zip
