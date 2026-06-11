@@ -1,0 +1,9 @@
+/outputs/*
+__pycache__/
+*.pyc
+lambda/__pycache__/
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.backup
+terraform/lambda_function.zip
+scan_results/
