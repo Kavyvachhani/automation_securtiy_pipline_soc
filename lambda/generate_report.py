@@ -50,6 +50,7 @@ def safe_str(val, maxlen=90):
     if val is None:
         return ""
     s = str(val).replace("\n", " ").replace("\r", " ").strip()
+    s = s.encode("latin-1", errors="replace").decode("latin-1")
     return s[:maxlen] + "..." if len(s) > maxlen else s
 
 # --- NORMALISED FINDING --------------------------------------
@@ -500,12 +501,12 @@ class SecurityPDF(FPDF):
         self.set_font("Helvetica", "B", 10)
         self.set_fill_color(241, 245, 249)
         rows = [
-            ("Generated",   meta["timestamp"]),
-            ("Commit SHA",  meta["commit_sha"]),
-            ("Branch",      meta["branch"]),
-            ("Run ID",      meta["run_id"]),
-            ("Pipeline",    "Enterprise DevSecOps Platform v2"),
-            ("Target",      "OWASP Juice Shop (Intentionally Vulnerable)"),
+            ("Generated",      meta.get("Generated", "unknown")),
+            ("Commit SHA",     meta.get("Commit SHA", "unknown")),
+            ("Branch",         meta.get("Branch", "unknown")),
+            ("Run ID",         meta.get("Run ID", "unknown")),
+            ("Pipeline",       "Enterprise DevSecOps Platform v2"),
+            ("Target",         "OWASP Juice Shop (Intentionally Vulnerable)"),
             ("Classification", "CONFIDENTIAL - SOC2 Audit Evidence"),
         ]
         for label, value in rows:
