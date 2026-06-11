@@ -56,11 +56,56 @@ def parse_zap(data):
             else: sev = "INFO"
             count = int(alert.get("count", 1))
             stats[sev] += count
-            if sev == "HIGH":
+            if sev in ["HIGH", "CRITICAL"]:
                 vulns.append({"id": alert.get("pluginid", "N/A"), "title": alert.get("alert", "No Title")[:80], "severity": sev})
     return stats, vulns
 
-def create_pdf(t_stats, t_vulns, s_stats, s_vulns, z_stats, z_vulns, output_path):
+def parse_nuclei(data_list):
+    stats = defaultdict(int)
+    vulns = []
+    if not data_list: return stats, vulns
+    # nuclei-results.json can be an array or json lines, but nuclei action with json output usually makes it an array
+    if not isinstance(data_list, list): data_list = [data_list]
+    for r in data_list:
+        sev = r.get("info", {}).get("severity", "UNKNOWN").upper()
+        stats[sev] += 1
+        if sev in ["CRITICAL", "HIGH"]:
+            vulns.append({"id": r.get("template-id", "N/A")[:30], "title": r.get("info", {}).get("name", "No Title")[:80], "severity": sev})
+    return stats, vulns
+
+def parse_shannon(data):
+    stats = defaultdict(int)
+    vulns = []
+    if not data or "findings" not in data: return stats, vulns
+    for f in data["findings"]:
+        sev = f.get("severity", "UNKNOWN").upper()
+        stats[sev] += 1
+        if sev in ["CRITICAL", "HIGH"]:
+            vulns.append({"id": f.get("endpoint", "N/A")[:30], "title": f.get("vulnerability", "No Title")[:80], "severity": sev})
+    return stats, vulns
+
+def parse_checkov(data):
+    stats = defaultdict(int)
+    vulns = []
+    if not data or "results" not in data: return stats, vulns
+    for f in data["results"].get("failed_checks", []):
+        sev = "HIGH" # Checkov doesn't always have strict severity, assume HIGH for failed IaC
+        stats[sev] += 1
+        vulns.append({"id": f.get("check_id", "N/A")[:30], "title": f.get("check_name", "No Title")[:80], "severity": sev})
+    return stats, vulns
+
+def parse_gitleaks(data_list):
+    stats = defaultdict(int)
+    vulns = []
+    if not data_list: return stats, vulns
+    if not isinstance(data_list, list): data_list = [data_list]
+    for f in data_list:
+        sev = "CRITICAL"
+        stats[sev] += 1
+        vulns.append({"id": f.get("RuleID", "N/A")[:30], "title": f"Secret exposed in {f.get('File', 'Unknown')} at commit {f.get('Commit', 'N/A')[:7]}", "severity": sev})
+    return stats, vulns
+
+def create_pdf(t_stats, t_vulns, s_stats, s_vulns, z_stats, z_vulns, n_stats, n_vulns, sh_stats, sh_vulns, c_stats, c_vulns, g_stats, g_vulns, output_path):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
@@ -99,9 +144,14 @@ def create_pdf(t_stats, t_vulns, s_stats, s_vulns, z_stats, z_vulns, output_path
                 pdf.cell(0, 6, f"... and {len(vulns)-20} more critical/high issues hidden for brevity.", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(10)
         
-    print_section("1. Trivy (SCA & Container Scan)", t_stats, t_vulns)
-    print_section("2. Semgrep (SAST)", s_stats, s_vulns)
-    print_section("3. OWASP ZAP (DAST)", z_stats, z_vulns)
+    print_section("1. Secret Scanning (Gitleaks)", g_stats, g_vulns)
+    print_section("2. IaC Misconfigurations (Checkov)", c_stats, c_vulns)
+    print_section("3. SCA & Container Scan (Trivy)", t_stats, t_vulns)
+    print_section("4. SAST Code Scan (Semgrep)", s_stats, s_vulns)
+    print_section("5. Endpoint AI Pentest (Shannon AI)", sh_stats, sh_vulns)
+    print_section("6. DAST Pentest (OWASP ZAP)", z_stats, z_vulns)
+    print_section("7. DAST Zero-Day Scan (Nuclei)", n_stats, n_vulns)
+    
     pdf.output(output_path)
 
 def handler(event, context):
@@ -113,17 +163,27 @@ def handler(event, context):
     t_data = get_s3_json(f"{prefix}/trivy-results.json")
     s_data = get_s3_json(f"{prefix}/semgrep-results.json")
     z_data = get_s3_json(f"{prefix}/zap-results.json")
+    n_data = get_s3_json(f"{prefix}/nuclei-results.json")
+    sh_data = get_s3_json(f"{prefix}/shannon-results.json")
+    c_data = get_s3_json(f"{prefix}/checkov-results.json")
+    g_data = get_s3_json(f"{prefix}/gitleaks-results.json")
     
     t_stats, t_vulns = parse_trivy(t_data)
     s_stats, s_vulns = parse_semgrep(s_data)
     z_stats, z_vulns = parse_zap(z_data)
+    n_stats, n_vulns = parse_nuclei(n_data)
+    sh_stats, sh_vulns = parse_shannon(sh_data)
+    c_stats, c_vulns = parse_checkov(c_data)
+    g_stats, g_vulns = parse_gitleaks(g_data)
     
     output_pdf = "/tmp/SOC2_DevSecOps_Master_Report.pdf"
-    create_pdf(t_stats, t_vulns, s_stats, s_vulns, z_stats, z_vulns, output_pdf)
+    create_pdf(t_stats, t_vulns, s_stats, s_vulns, z_stats, z_vulns, n_stats, n_vulns, sh_stats, sh_vulns, c_stats, c_vulns, g_stats, g_vulns, output_pdf)
     
+    # Uploading to the scans folder so it's right alongside the raw json files for easy access!
+    s3.upload_file(output_pdf, BUCKET, f"scans/{commit_sha}/SOC2_DevSecOps_Master_Report.pdf")
     s3.upload_file(output_pdf, BUCKET, f"reports/{commit_sha}/SOC2_DevSecOps_Master_Report.pdf")
     
     return {
         "statusCode": 200,
-        "body": f"Report generated successfully at s3://{BUCKET}/reports/{commit_sha}/SOC2_DevSecOps_Master_Report.pdf"
+        "body": f"Report generated successfully at s3://{BUCKET}/scans/{commit_sha}/SOC2_DevSecOps_Master_Report.pdf"
     }
